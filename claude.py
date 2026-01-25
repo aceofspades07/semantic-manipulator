@@ -16,6 +16,13 @@ class JengaBlockDetector:
         """
         self.focal_length = focal_length
         self.real_block_length = real_block_length
+
+        # Known real-world short sides (cm). A Jenga block is 1.5 x 2.5 x 7 cm.
+        # Depending on orientation, the visible "breadth" can be 2.5cm (top face)
+        # or 1.5cm (side face). We use both to avoid over-splitting.
+        self.real_block_short_sides = (2.5, 1.5)
+        self.split_tolerance = 0.30
+        self.max_split_per_axis = 8
         
         # Camera intrinsics for 3D coordinate conversion
         self.camera_intrinsics = camera_intrinsics or {
@@ -28,13 +35,13 @@ class JengaBlockDetector:
         # Define HSV color ranges for each Jenga block color
         # Tightened ranges to reduce false positives
         self.color_ranges = {
-            'red': [(np.array([0, 100, 100]), np.array([10, 255, 255])),
+            'red': [(np.array([0, 100, 100]), np.array([5, 255, 255])),
                     (np.array([160, 100, 100]), np.array([180, 255, 255]))],
-            'blue': [(np.array([100, 100, 100]), np.array([130, 255, 255]))],
+            'blue': [(np.array([70, 100, 100]), np.array([130, 255, 255]))],
             'green': [(np.array([40, 50, 50]), np.array([80, 255, 255]))],
-            'yellow': [(np.array([20, 100, 100]), np.array([35, 255, 255]))],
-            'pink': [(np.array([140, 50, 50]), np.array([170, 255, 255]))],
-            'orange': [(np.array([10, 100, 100]), np.array([25, 255, 255]))]
+            'yellow': [(np.array([21, 100, 100]), np.array([35, 255, 255]))], # Start at 21 to avoid Orange
+            'pink': [(np.array([140, 25, 150]), np.array([165, 255, 255]))],   # End at 159 to avoid high Red
+            'orange': [(np.array([6, 100, 100]), np.array([20, 255, 255]))]  # 11-20 to fit between Red and Yellow
         }
     
     def segment_color(self, hsv_image, color_name):
@@ -121,6 +128,107 @@ class JengaBlockDetector:
             'y': y,
             'z': z
         }
+
+    def _major_axis_unit_vector(self, angle_deg):
+        """Return a unit vector (vx, vy) along the block's longest side in image coords.
+
+        Note: OpenCV image coordinates are: +x right, +y down.
+        """
+        theta = np.deg2rad(angle_deg)
+        vx = float(np.cos(theta))
+        vy = float(np.sin(theta))
+        norm = (vx * vx + vy * vy) ** 0.5
+        if norm < 1e-8:
+            return 1.0, 0.0
+        return vx / norm, vy / norm
+
+    def _direction_away_from_observer_bottom(self, vx, vy):
+        """Resolve the +/- ambiguity so the vector points away from an observer at bottom.
+
+        Observer A is at the bottom of the frame, facing the top.
+        "Away from A" therefore means "toward the top" in the image plane.
+        We choose the sign that maximizes the component in the (0, -1) direction.
+        """
+        eps = 1e-6
+        # Prefer negative y (upwards). If perfectly horizontal, prefer +x for stability.
+        if (vy > eps) or (abs(vy) <= eps and vx < 0):
+            return -vx, -vy
+        return vx, vy
+
+    def _split_rect_if_merged(self, rect_info):
+        """Split a (potentially merged) min-area rect into multiple block-sized rects.
+
+        If multiple same-color blocks touch, they can form a single contour.
+        Since Jenga blocks have fixed dimensions, we split oversized rectangles into
+        multiple equal-breadth rectangles. The number of splits scales with how much
+        the breadth/length exceeds the expected single-block size.
+
+        Returns a list of rect_info dicts (same schema as find_aligned_rectangle).
+        """
+        width = float(rect_info['width'])
+        height = float(rect_info['height'])
+        if width <= 1e-6 or height <= 1e-6:
+            return [rect_info]
+
+        observed_aspect = width / height
+
+        # Choose the expected aspect that best matches this observation to avoid
+        # splitting a single block when it is showing the 7x1.5 face.
+        expected_aspects = [self.real_block_length / s for s in self.real_block_short_sides]
+        expected_aspect = min(expected_aspects, key=lambda a: abs(observed_aspect - a))
+
+        tol = float(self.split_tolerance)
+
+        # Determine how many blocks are merged along each axis.
+        # For a single block: observed_aspect ~= expected_aspect.
+        n_major = 1
+        if observed_aspect > expected_aspect * (1.0 + tol):
+            n_major = int(round(observed_aspect / expected_aspect))
+
+        n_minor = 1
+        # Equivalent to: (height/width) > (1/expected_aspect)*(1+tol)
+        if (height / width) * expected_aspect > (1.0 + tol):
+            n_minor = int(round((height / width) * expected_aspect))
+
+        n_major = max(1, min(self.max_split_per_axis, n_major))
+        n_minor = max(1, min(self.max_split_per_axis, n_minor))
+
+        if n_major == 1 and n_minor == 1:
+            return [rect_info]
+
+        # Subdivide into a grid of n_major x n_minor rectangles aligned with the same angle.
+        angle = float(rect_info['angle'])
+        theta = np.deg2rad(angle)
+        ux, uy = float(np.cos(theta)), float(np.sin(theta))          # major axis
+        vx, vy = -uy, ux                                             # minor axis (perpendicular)
+
+        sub_w = width / n_major
+        sub_h = height / n_minor
+
+        cx0, cy0 = float(rect_info['center'][0]), float(rect_info['center'][1])
+        out = []
+
+        for i in range(n_major):
+            for j in range(n_minor):
+                # Offsets are centered so the grid stays centered at the original rect.
+                off_major = (i - (n_major - 1) / 2.0) * sub_w
+                off_minor = (j - (n_minor - 1) / 2.0) * sub_h
+                cx = cx0 + off_major * ux + off_minor * vx
+                cy = cy0 + off_major * uy + off_minor * vy
+
+                sub_rect = ((cx, cy), (sub_w, sub_h), angle)
+                box = cv2.boxPoints(sub_rect)
+                box = np.int32(box)
+
+                out.append({
+                    'center': (cx, cy),
+                    'width': sub_w,
+                    'height': sub_h,
+                    'angle': angle,
+                    'box': box
+                })
+
+        return out
     
     def detect_blocks(self, image):
         """Detect all Jenga blocks in the image"""
@@ -135,19 +243,13 @@ class JengaBlockDetector:
                 area = cv2.contourArea(contour)
                 
                 # Filter by area - Jenga blocks should have reasonable size
-                if area < 1500:  # Minimum area to filter noise
+                if area < 500:  # Minimum area to filter noise
                     continue
                 
                 rect_info = self.find_aligned_rectangle(contour)
-                width = rect_info['width']
-                height = rect_info['height']
-                
-                # Filter by aspect ratio - Jenga blocks are elongated (7.5 x 2.5 cm)
-                # So we expect width/height ratio to be roughly between 1.5 and 5
-                if width > 0:
-                    aspect_ratio = width / height
-                    if aspect_ratio < 1.2 or aspect_ratio > 6:  # Too square or too elongated
-                        continue
+                # If the contour is a merged blob of multiple same-color blocks, split it
+                # into multiple block-sized rectangles based on expected Jenga dimensions.
+                rect_infos = self._split_rect_if_merged(rect_info)
                 
                 # Filter by solidity - block should be mostly filled
                 hull = cv2.convexHull(contour)
@@ -156,31 +258,45 @@ class JengaBlockDetector:
                     solidity = area / hull_area
                     if solidity < 0.6:  # Less than 60% filled is likely not a block
                         continue
-                
-                # Calculate distance using the LONGEST side
-                dist = 0.0
-                if self.focal_length is not None:
-                    dist = self.calculate_distance(width)
-                
-                # Convert 2D image center to 3D world coordinates
-                center_pixel = rect_info['center']
-                world_coords = self.pixel_to_3d_world(center_pixel[0], center_pixel[1], dist)
-                
-                block_data = {
-                    'color': color_name,
-                    'center': rect_info['center'],
-                    'width': width,
-                    'height': height,
-                    'angle': rect_info['angle'],
-                    'box': rect_info['box'],
-                    'area': area,
-                    'distance': dist,
-                    'aspect_ratio': aspect_ratio,
-                    'solidity': solidity,
-                    'world_coords': world_coords  # 3D coordinates with camera as origin
-                }
-                
-                detected_blocks.append(block_data)
+
+                # Split-aware per-rectangle block creation
+                approx_area_each = float(area) / max(1, len(rect_infos))
+
+                for ri in rect_infos:
+                    width = float(ri['width'])
+                    height = float(ri['height'])
+                    if width <= 1e-6 or height <= 1e-6:
+                        continue
+
+                    aspect_ratio = width / height
+                    # For split rectangles this should fall back into the normal range.
+                    if aspect_ratio < 1.2 or aspect_ratio > 6:
+                        continue
+
+                    # Calculate distance using the LONGEST side
+                    dist = 0.0
+                    if self.focal_length is not None:
+                        dist = self.calculate_distance(width)
+
+                    # Convert 2D image center to 3D world coordinates
+                    center_pixel = ri['center']
+                    world_coords = self.pixel_to_3d_world(center_pixel[0], center_pixel[1], dist)
+
+                    block_data = {
+                        'color': color_name,
+                        'center': ri['center'],
+                        'width': width,
+                        'height': height,
+                        'angle': ri['angle'],
+                        'box': ri['box'],
+                        'area': approx_area_each,
+                        'distance': dist,
+                        'aspect_ratio': aspect_ratio,
+                        'solidity': solidity,
+                        'world_coords': world_coords  # 3D coordinates with camera as origin
+                    }
+
+                    detected_blocks.append(block_data)
         
         return detected_blocks
     
@@ -195,6 +311,18 @@ class JengaBlockDetector:
             # Draw center point
             center = tuple(map(int, block['center']))
             cv2.circle(result, center, 5, (0, 0, 255), -1)
+
+            # Draw direction arrow along the block's length (away from bottom-of-frame observer)
+            vx, vy = self._major_axis_unit_vector(block['angle'])
+            vx, vy = self._direction_away_from_observer_bottom(vx, vy)
+            arrow_len = int(max(30, min(0.6 * float(block['width']), 180)))
+            end_pt = (
+                int(round(block['center'][0] + vx * arrow_len)),
+                int(round(block['center'][1] + vy * arrow_len)),
+            )
+            # Make arrow bold/visible: draw a dark outline first, then bright arrow on top
+            cv2.arrowedLine(result, center, end_pt, (0, 0, 0), 10, tipLength=0.35)
+            cv2.arrowedLine(result, center, end_pt, (255, 255, 0), 5, tipLength=0.35)
             
             # Text information
             text_lines = [
