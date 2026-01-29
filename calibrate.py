@@ -4,10 +4,10 @@ import pyrealsense2 as rs
 
 DEFAULT_ROBOT_COORDS = np.array(
     [
-        [100.0, 200.0],  # ID 0 (Top-Left)
-        [100.0, 500.0],  # ID 1 (Top-Right)
-        [400.0, 500.0],  # ID 2 (Bottom-Right)
-        [400.0, 200.0],  # ID 3 (Bottom-Left)
+        [-225.0, 125.0],  # ID 0 (Top-Left)
+        [225.0, 125.0],  # ID 1 (Top-Right)
+        [225.0, -175.0],  # ID 2 (Bottom-Right)
+        [-225.0, -175.0],  # ID 3 (Bottom-Left)
     ],
     dtype="float32",
 )

@@ -43,6 +43,9 @@ class JengaBlockDetector:
             'pink': [(np.array([140, 25, 150]), np.array([165, 255, 255]))],   # End at 159 to avoid high Red
             'orange': [(np.array([6, 100, 100]), np.array([20, 255, 255]))]  # 11-20 to fit between Red and Yellow
         }
+        
+        # Homography matrix for coordinate frame transformation
+        self.homography_matrix = None
     
     def segment_color(self, hsv_image, color_name):
         """Create mask for a specific color"""
@@ -127,6 +130,64 @@ class JengaBlockDetector:
             'x': x,
             'y': y,
             'z': z
+        }
+    
+    def load_calibration_matrix(self, matrix_path="calibration_matrix.npy"):
+        """Load homography matrix from calibration file"""
+        try:
+            self.homography_matrix = np.load(matrix_path)
+            print(f"Loaded calibration matrix from {matrix_path}")
+            return True
+        except FileNotFoundError:
+            print(f"Error: {matrix_path} not found! Run calibrate.py first!")
+            self.homography_matrix = None
+            return False
+    
+    def transform_to_new_frame(self, camera_coords):
+        """Transform coordinates from camera frame to new frame using homography
+        
+        Args:
+            camera_coords: Dict with 'x', 'y', 'z' in camera frame (cm)
+            
+        Returns:
+            Dict with 'x', 'y', 'z' in new frame, or None if no calibration matrix
+        """
+        if self.homography_matrix is None:
+            return None
+            
+        # Project 3D camera coordinates to 2D image coordinates
+        fx = self.camera_intrinsics['fx']
+        fy = self.camera_intrinsics['fy']
+        ppx = self.camera_intrinsics['ppx']
+        ppy = self.camera_intrinsics['ppy']
+        
+        # Convert 3D camera coords back to image pixels
+        if abs(camera_coords['z']) < 1e-6:
+            return None
+            
+        u = (camera_coords['x'] * fx / camera_coords['z']) + ppx
+        v = (camera_coords['y'] * fy / camera_coords['z']) + ppy
+        
+        # Apply homography to transform image coordinates to new frame coordinates
+        image_point = np.array([u, v, 1.0], dtype=np.float64)
+        transformed_point = self.homography_matrix @ image_point
+        
+        # Normalize homogeneous coordinates
+        if abs(transformed_point[2]) < 1e-6:
+            return None
+            
+        x_new = transformed_point[0] / transformed_point[2]
+        y_new = transformed_point[1] / transformed_point[2]
+        
+        # Calculate z coordinate: camera is at z=78.5cm, new frame origin at z=0
+        # Block's z in new frame = camera_z - distance_from_camera
+        camera_z_in_new_frame = 78.5  # cm
+        z_new = camera_z_in_new_frame - camera_coords['z']
+        
+        return {
+            'x': float(x_new),
+            'y': float(y_new),
+            'z': float(z_new)
         }
 
     def _major_axis_unit_vector(self, angle_deg):
@@ -281,6 +342,9 @@ class JengaBlockDetector:
                     # Convert 2D image center to 3D world coordinates
                     center_pixel = ri['center']
                     world_coords = self.pixel_to_3d_world(center_pixel[0], center_pixel[1], dist)
+                    
+                    # Transform to new coordinate frame if calibration matrix is available
+                    new_frame_coords = self.transform_to_new_frame(world_coords)
 
                     block_data = {
                         'color': color_name,
@@ -293,7 +357,8 @@ class JengaBlockDetector:
                         'distance': dist,
                         'aspect_ratio': aspect_ratio,
                         'solidity': solidity,
-                        'world_coords': world_coords  # 3D coordinates with camera as origin
+                        'world_coords': world_coords,  # 3D coordinates with camera as origin
+                        'new_frame_coords': new_frame_coords  # 3D coordinates in new frame
                     }
 
                     detected_blocks.append(block_data)
@@ -325,16 +390,23 @@ class JengaBlockDetector:
             cv2.arrowedLine(result, center, end_pt, (255, 255, 0), 5, tipLength=0.35)
             
             # Text information
-            text_lines = [
+            text_lines = []
+            
+            # Add new frame coordinates if available
+            if block['new_frame_coords'] is not None:
+                new_coords = block['new_frame_coords']
+                text_lines.append(f"New Frame: ({new_coords['x']:.1f}, {new_coords['y']:.1f}, {new_coords['z']:.1f})")
+            
+            text_lines.extend([
                 f"{block['color'].upper()}",
                 f"Dist: {block['distance']:.1f} cm"
-            ]
+            ])
             
-            y_offset = -20
+            y_offset = -30 if block['new_frame_coords'] is not None else -20
             for line in text_lines:
-                cv2.putText(result, line, (center[0] - 40, center[1] + y_offset),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                y_offset += 20
+                cv2.putText(result, line, (center[0] - 60, center[1] + y_offset),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                y_offset += 15
         
         return result
 
@@ -374,6 +446,9 @@ if __name__ == "__main__":
         print(f"  Principal Point: ({intrinsics.ppx:.2f}, {intrinsics.ppy:.2f})")
         print(f"  Resolution: {intrinsics.width} x {intrinsics.height}")
         
+        # Load calibration matrix for coordinate transformation
+        detector.load_calibration_matrix("calibration_matrix.npy")
+        
         while True:
             frames = pipeline.wait_for_frames()
             color_frame = frames.get_color_frame()
@@ -399,7 +474,11 @@ if __name__ == "__main__":
                 print(f"--- Frame {frame_count} ---")
                 for b in blocks:
                     coords = b['world_coords']
-                    print(f"[{b['color']}] Distance: {b['distance']:.1f}cm | Angle: {b['angle']:.1f}° | 3D Coords: X={coords['x']:.1f}cm, Y={coords['y']:.1f}cm, Z={coords['z']:.1f}cm")
+                    new_coords = b['new_frame_coords']
+                    coord_str = f"Camera: X={coords['x']:.1f}, Y={coords['y']:.1f}, Z={coords['z']:.1f}cm"
+                    if new_coords is not None:
+                        coord_str += f" | New Frame: X={new_coords['x']:.1f}, Y={new_coords['y']:.1f}, Z={new_coords['z']:.1f}cm"
+                    print(f"[{b['color']}] Distance: {b['distance']:.1f}cm | Angle: {b['angle']:.1f}° | {coord_str}")
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
