@@ -301,19 +301,6 @@ def system_logic():
         calib_file = os.path.join(os.path.dirname(__file__), "calibration", "calibration_matrix.npy")
         return os.path.isfile(calib_file)
 
-    def auto_calibrate_on_load(state):
-        """
-        Triggered automatically when the page loads (Feature 2).
-        Checks if calibration file exists, and runs calibration if missing.
-        """
-        if not check_calibration_file_exists() and not state["disabled"]:
-            msg, new_state = run_calibration(state)
-            return msg, new_state
-        if not state["disabled"]:
-            state["calibrated"] = True
-            return "System Ready (Calibration file detected)", state
-        return "System Ready (Cached)", state
-
     def handle_signal(signal_code, state):
         """
         Handles the specific signal to disable functionality (Feature 4).
@@ -370,9 +357,15 @@ def system_logic():
             with gr.Column(scale=1):
                 # Feature 2 & 4: Controls and Status
                 gr.Markdown("### System Status")
-                
-                # Feature 2: Calibration Button
-                calibrate_btn = gr.Button("📡 Send Calibration Signal", variant="primary")
+                # Determine whether calibration file exists; if it does, log and disable the button
+                calib_file = os.path.join(os.path.dirname(__file__), "calibration", "calibration_matrix.npy")
+                file_exists = os.path.isfile(calib_file)
+                if file_exists:
+                    print(f"[Calibration] Detected calibration file: {calib_file}")
+                    calibrate_btn = gr.Button("📡 Send Calibration Signal", variant="primary", interactive=False)
+                else:
+                    print(f"[Calibration] No calibration file found; enabling calibration button")
+                    calibrate_btn = gr.Button("📡 Send Calibration Signal", variant="primary", interactive=True)
                 
                 # Feature 3: Inference Display
                 inference_output = gr.TextArea(
@@ -420,14 +413,6 @@ def system_logic():
         # 2. Manual Calibration
         calibrate_btn.click(
             run_calibration,
-            inputs=[system_state],
-            outputs=[inference_output, system_state]
-        )
-
-        # 3. Automatic Calibration on Page Load
-        # This triggers immediately when the browser loads the interface
-        demo.load(
-            auto_calibrate_on_load,
             inputs=[system_state],
             outputs=[inference_output, system_state]
         )
