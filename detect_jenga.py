@@ -2,6 +2,9 @@ import cv2
 import numpy as np
 import pyrealsense2 as rs
 
+TABLE_Z_HEIGHT = -120.0
+BLOCK_HEIGHT = 15.0
+
 class JengaBlockDetector:
     def __init__(self, focal_length=None, real_block_length=7, camera_intrinsics=None):
         """
@@ -182,7 +185,7 @@ class JengaBlockDetector:
         # Calculate z coordinate: camera is at z=78.5cm, new frame origin at z=0
         # Block's z in new frame = camera_z - distance_from_camera
         camera_z_in_new_frame = 78.5  # cm
-        z_new = camera_z_in_new_frame - camera_coords['z']
+        z_new = camera_z_in_new_frame - camera_coords['z'] + TABLE_Z_HEIGHT + BLOCK_HEIGHT / 2.0
         
         return {
             'x': float(x_new),
