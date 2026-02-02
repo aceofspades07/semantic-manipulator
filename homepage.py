@@ -11,6 +11,11 @@ import numpy as np
 import pyrealsense2 as rs
 from typing import Optional, Dict, Any, List, Tuple
 
+# Import text classifier and action controller
+from text_classifier import ActionClassifier
+from roarm_m2.actions.control_action import ActionController
+from colour_coordinates import ColourCoordinates
+
 # ==========================================
 # ROARM CONTROLLER CLASS
 # ==========================================
@@ -373,6 +378,22 @@ def system_logic():
     # Initialize robot - will try real arm first, fall back to mock
     robot = RobotMockTeleop(ip_address="192.168.4.1")
     
+    # Initialize text classifier for command interpretation
+    print("[System] Initializing action classifier...")
+    action_classifier = ActionClassifier()
+    action_classifier.train()
+    print("[System] Action classifier ready")
+    
+    # Initialize action controller for robot commands
+    print("[System] Initializing action controller...")
+    action_controller = ActionController(roarm_ip="192.168.4.1")
+    print("[System] Action controller ready")
+    
+    # Initialize color detector for picking objects
+    print("[System] Initializing color detector...")
+    color_detector = ColourCoordinates()
+    print("[System] Color detector ready")
+    
     # Map keyboard keys to robot commands
     teleop_commands = {
         'w': lambda: robot.teleop_move('Forward'),
@@ -387,6 +408,7 @@ def system_logic():
     def process_chat(user_message, history, state):
         """
         Handles chat interaction and inference generation.
+        Processes user commands through the text classifier and executes robot actions.
         """
         # Ensure history is initialized
         if history is None:
@@ -409,16 +431,107 @@ def system_logic():
         if not user_message.strip():
             return history, "", ""
 
-        # Simulate chatbot logic
-        bot_response = f"I received: {user_message}"
+        # Step 1: Classify the user message
+        classification = action_classifier.predict(user_message)
+        action = classification['action']
+        color = classification['color']
+        confidence = classification['confidence']
+        
+        # Build inference output
+        inference_lines = [
+            f"━━━━ COMMAND ANALYSIS ━━━━",
+            f"Input: {user_message}",
+            f"Action: {action.upper()}",
+        ]
+        
+        if color:
+            inference_lines.append(f"Color: {color.upper()}")
+        
+        inference_lines.append(f"Confidence: {confidence:.1%}")
+        inference_lines.append(f"")
+        
+        # Step 2: Execute the action
+        bot_response = ""
+        
+        if action == "none":
+            bot_response = f"I couldn't identify a valid robot action from your message. I can help you with:\n• Pick [color] block\n• Place the block\n• Drop the block"
+            inference_lines.append(f"Status: No valid action detected")
+            
+        elif action == "pick":
+            if not color:
+                bot_response = "Please specify a color for the pick action (e.g., 'pick the red block')"
+                inference_lines.append(f"Status: Missing color parameter")
+            else:
+                inference_lines.append(f"Status: Detecting {color} objects...")
+                
+                try:
+                    # Get coordinates of objects
+                    targets = color_detector.capture()
+                    
+                    if color not in targets or len(targets[color]) == 0:
+                        bot_response = f"No {color} objects detected. Please ensure the object is visible to the camera."
+                        inference_lines.append(f"Result: No {color} objects found")
+                    else:
+                        # Execute pick action
+                        inference_lines.append(f"Result: Found {len(targets[color])} {color} object(s)")
+                        inference_lines.append(f"Status: Executing pick action...")
+                        
+                        success, msg = action_controller.execute_action(
+                            action="pick",
+                            targets=targets,
+                            color=color
+                        )
+                        
+                        if success:
+                            bot_response = f"✓ Successfully picked {color} block! {msg}"
+                            inference_lines.append(f"Execution: SUCCESS")
+                        else:
+                            bot_response = f"✗ Failed to pick {color} block: {msg}"
+                            inference_lines.append(f"Execution: FAILED - {msg}")
+                            
+                except Exception as e:
+                    bot_response = f"Error during pick operation: {str(e)}"
+                    inference_lines.append(f"Error: {str(e)}")
+                    
+        elif action == "place":
+            inference_lines.append(f"Status: Executing place action...")
+            
+            try:
+                success, msg = action_controller.execute_action(action="place")
+                
+                if success:
+                    bot_response = f"✓ Successfully placed the block! {msg}"
+                    inference_lines.append(f"Execution: SUCCESS")
+                else:
+                    bot_response = f"✗ Failed to place block: {msg}"
+                    inference_lines.append(f"Execution: FAILED - {msg}")
+                    
+            except Exception as e:
+                bot_response = f"Error during place operation: {str(e)}"
+                inference_lines.append(f"Error: {str(e)}")
+                
+        elif action == "drop":
+            inference_lines.append(f"Status: Executing drop action...")
+            
+            try:
+                success, msg = action_controller.execute_action(action="drop")
+                
+                if success:
+                    bot_response = f"✓ Successfully dropped! {msg}"
+                    inference_lines.append(f"Execution: SUCCESS")
+                else:
+                    bot_response = f"✗ Failed to drop: {msg}"
+                    inference_lines.append(f"Execution: FAILED - {msg}")
+                    
+            except Exception as e:
+                bot_response = f"Error during drop operation: {str(e)}"
+                inference_lines.append(f"Error: {str(e)}")
 
         # Append messages in the dict format expected by newer Gradio versions
         history.append({"role": "user", "content": user_message})
         history.append({"role": "assistant", "content": bot_response})
 
-        # Simulate "Inference" processing (Feature 3)
-        inference_data = f"ANALYSIS: Input length {len(user_message)} chars.\nINTENT: General Query.\nSTATUS: Processed successfully."
-
+        inference_data = "\n".join(inference_lines)
         return history, inference_data, ""
 
     # ==========================================
