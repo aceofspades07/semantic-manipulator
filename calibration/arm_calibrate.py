@@ -57,7 +57,7 @@ class InteractiveCalibrator:
         *,
         marker_ids: Tuple[int, int, int, int] = (0, 1, 2, 3),
         aruco_dict_name: int = cv2.aruco.DICT_4X4_50,
-        save_path: str = "/home/karan/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy",
+        save_path: str = "/home/arduino/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy",
     ) -> None:
         self.marker_ids = marker_ids
         self.save_path = save_path

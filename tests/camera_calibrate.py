@@ -20,7 +20,7 @@ class Calibrator:
         *,
         marker_ids: tuple[int, int, int, int] = (0, 1, 2, 3),
         aruco_dict_name: int = cv2.aruco.DICT_4X4_50,
-        save_path: str = "/home/karan/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy",
+        save_path: str = "/home/arduino/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy",
     ) -> None:
         coords = np.asarray(robot_coords, dtype="float32")
         if coords.shape != (4, 2):

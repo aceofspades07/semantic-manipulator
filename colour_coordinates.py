@@ -60,7 +60,7 @@ class ColourCoordinates:
         home_t: float = 3.14,
         speed: float = 0.4,
         rs_timeout: float = 5.0,
-        calibration_path: str = "/home/karan/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy"
+        calibration_path: str = "/home/arduino/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy"
     ):
         """Initialize the ColourCoordinates detector.
         

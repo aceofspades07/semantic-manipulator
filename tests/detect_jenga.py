@@ -135,7 +135,7 @@ class JengaBlockDetector:
             'z': z
         }
     
-    def load_calibration_matrix(self, matrix_path="/home/karan/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy"):
+    def load_calibration_matrix(self, matrix_path="/home/arduino/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy"):
         """Load homography matrix from calibration file"""
         try:
             self.homography_matrix = np.load(matrix_path)
@@ -554,7 +554,7 @@ if __name__ == "__main__":
         print(f"  Resolution: {intrinsics.width} x {intrinsics.height}")
         
         # Load calibration matrix for coordinate transformation
-        detector.load_calibration_matrix("/home/karan/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy")
+        detector.load_calibration_matrix("/home/arduino/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy")
         
         while True:
             frames = pipeline.wait_for_frames()
