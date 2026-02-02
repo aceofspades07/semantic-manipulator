@@ -170,7 +170,7 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 
 ## License
 
-[Add your license information here]
+This project is licensed under Mozilla Public License 2.0
 
 ## Contact
 
@@ -188,4 +188,4 @@ For questions or support, please open an issue on the [GitHub repository](https:
 
 ---
 
-**Note**: This project was developed as part of the Qualcomm AI Challenge. For more information about the challenge, visit [Qualcomm AI Hub](https://www.qualcomm.com/developer).
+**Note**: This project was developed as part of the Qualcomm Arduino AI Challenge.
