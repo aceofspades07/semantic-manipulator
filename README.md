@@ -1,4 +1,4 @@
-# Semantic Manipulator - AN NLP-Driven Robotic Arm
+# [AfA2026-PhysicalAI] Semantic Manipulator - AN NLP-Driven Robotic Arm
 
 ## WATCH THE DEMONSTRATION VIDEO HERE : https://youtu.be/FhsI4L-pOcw
 
