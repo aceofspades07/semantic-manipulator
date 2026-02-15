@@ -1,11 +1,11 @@
 # [AfA2026-PhysicalAI] Semantic Manipulator - AN NLP-Driven Robotic Arm
 
-## WATCH THE DEMONSTRATION VIDEO HERE : https://youtu.be/FhsI4L-pOcw
-
 Industrial robotic arms are traditionally complex to program, requiring specialized knowledge of coordinate systems, kinematics, and pendant programming. This creates a massive barrier to entry for non-technical users who want to utilize robotics for dynamic tasks like sorting, organization, or lab automation. 
 The Semantic Manipulator" is an Embodied AI Agent that bridges the gap between human language and physical actuation. By integrating a Natural Language Processing Model (NLP) with the Arduino UNO Q kit, this project allows users to control a 4-DOF robotic arm using natural language commands (e.g., "Pick up the red block and move it to the right"). 
 
-In this application, we have implemented a robust system to detect and segment coloured Jenga blocks, following which, a user can enter Natural Language prompts to control a Robotic Arm to pick up a block, gently place a block, and immediately drop a block. 
+In this application, we have implemented a robust system to detect and segment coloured Jenga blocks, following which, a user can enter Natural Language prompts to control a Robotic Arm to pick up a block, gently place a block, and immediately drop a block.
+
+https://youtu.be/FhsI4L-pOcw
  
 The system utilizes computer vision for detection and colour segmentation of Jenga blocks. It translates unstructured text entered by the user into structured JSON protocols, which the Arduino Uno Q parses to orchestrate a safety-critical Finite State Machine (FSM). 
 
