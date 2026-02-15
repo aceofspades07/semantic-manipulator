@@ -1,9 +1,20 @@
-.vscode
+# IDE
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
 qualcomm/
-roarm-m2/.vscode
-B-D-fndr
-roarm_m2/pycache
-blog_post.md
+
+# Prebuilt libraries
+lib/
+
+# Draft documents
+docs/
 semantic-manipulator.txt
 THE-SEMANTIC-MANIPULATOR.docx
 
