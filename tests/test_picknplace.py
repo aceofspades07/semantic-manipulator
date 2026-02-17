@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
-"""Test script for ActionController and ColourCoordinates integration.
-
-This script tests the robustness of the pick, place, and drop actions
-on real Jenga blocks detected by the RealSense camera.
-
-The script:
-1. Detects blocks using ColourCoordinates
-2. Executes various action sequences to test FSM logic
-3. Re-detects blocks after each action to maintain accurate state
-"""
+"""Test script for ActionController and ColourCoordinates integration."""
 
 import sys
 import os
 import time
 import random
 
-# Add parent directories to path for imports
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
@@ -24,7 +14,6 @@ from colour_coordinates import ColourCoordinates
 from roarm_m2.actions.control_action import ActionController
 
 
-# Configurable delay range (seconds) between actions for block re-detection
 MIN_DELAY = 4.0
 MAX_DELAY = 5.0
 
@@ -58,11 +47,7 @@ def print_detected_blocks(coords: dict) -> None:
 
 def execute_and_log(controller: ActionController, action: str, 
                     targets: dict = None, color: str = None, detector = ColourCoordinates()) -> bool:
-    """Execute an action and log the result.
-    
-    Returns:
-        bool: True if action succeeded, False otherwise
-    """
+    """Execute an action and log the result."""
     print(f"\n>>> Executing: {action.upper()}", end="")
     if color:
         print(f" (color={color})", end="")
@@ -78,15 +63,7 @@ def execute_and_log(controller: ActionController, action: str,
 
 
 def refresh_blocks(detector: ColourCoordinates, delay: float = None) -> dict:
-    """Wait, then refresh block detection.
-    
-    Args:
-        detector: ColourCoordinates instance
-        delay: Delay in seconds before refreshing (random if None)
-    
-    Returns:
-        Updated coordinates dictionary
-    """
+    """Wait, then refresh block detection."""
     wait_time = delay if delay is not None else get_random_delay()
     print(f"\n... Waiting {wait_time:.1f}s before refreshing block detection ...")
     time.sleep(wait_time)
@@ -101,7 +78,7 @@ def refresh_blocks(detector: ColourCoordinates, delay: float = None) -> dict:
 def main():
     """Main test execution."""
     print_separator("ROBOTIC ARM ACTION CONTROLLER TEST")
-    print(f"  Project: Jenga Block Pick-Place-Drop Testing")
+    print(f"  Jenga Block Pick-Place-Drop Testing")
     print(f"  Delay range: {MIN_DELAY:.1f}s - {MAX_DELAY:.1f}s")
     
     # Initialize components

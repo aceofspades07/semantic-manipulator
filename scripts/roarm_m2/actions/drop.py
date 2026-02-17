@@ -1,7 +1,4 @@
-"""Drop action for RoArm-M2.
-
-Opens the gripper fully and moves the arm to a safe home position and closes the gripper.
-"""
+"""Drop action for RoArm-M2 to open gripper and return to home."""
 
 import os
 import time
@@ -10,6 +7,7 @@ from typing import Optional, Tuple
 
 
 def _load_roarm_controller_class():
+    """Dynamically loads RoArmController from roarm_helper.py."""
     here = os.path.dirname(__file__)
     helper_path = os.path.normpath(os.path.join(here, "..", "roarm_helper.py"))
 
@@ -30,21 +28,17 @@ def drop(arm: Optional[object] = None,
          home_z: float = 53.0,
          home_t: float = 3.14,
          speed: float = 0.4) -> Tuple[bool, str]:
-    """Open the gripper fully then move the arm to the home position.
-
-    Returns (success, message).
-    """
+    """Open the gripper and move to home position."""
     try:
         if arm is None:
             RoArmController = _load_roarm_controller_class()
             arm = RoArmController(ip_address=roarm_ip)
 
-        # Ensure motors are enabled
         arm.set_torque(True)
     except Exception as e:
         return False, f"Failed to initialize arm: {e}"
 
-    # Step 1: Open gripper fully
+    # Open gripper
     try:
         arm.set_joint(joint_id=4, angle=open_angle, wait=True)
     except Exception as e:
@@ -52,7 +46,7 @@ def drop(arm: Optional[object] = None,
 
     time.sleep(1)
 
-    # Step 2: Move to home position
+    # Move to home
     try:
         arm.move_cartesian(x=home_x, y=home_y, z=home_z, t=open_angle, speed=speed, wait=True)
     except Exception as e:

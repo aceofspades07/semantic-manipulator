@@ -1,3 +1,5 @@
+"""Interactive calibration script for the RoArm-M2 robotic arm using ArUco markers."""
+
 import cv2
 import numpy as np
 import pyrealsense2 as rs
@@ -6,9 +8,7 @@ from typing import Optional, List, Tuple
 import json
 import requests
 
-# ==========================================
-# 1. ROBOT INTERFACE (Hardware Abstraction)
-# ==========================================
+
 def get_current_robot_position(tid: int) -> Tuple[float, float]:
     ip_addr = '192.168.4.1'
     command = {"T": 105}
@@ -20,8 +20,7 @@ def get_current_robot_position(tid: int) -> Tuple[float, float]:
             response = requests.get(url, timeout=2)
             response.raise_for_status()
             
-            # Parse the JSON response
-            # Expected format example: {"T":105, "b":0, "s":0, "e":0, "h":0, "x":150, "y":0, "z":100, ...}
+            # Parse response and extract position data
             data = json.loads(response.text)
 
             
@@ -48,9 +47,7 @@ def get_current_robot_position(tid: int) -> Tuple[float, float]:
         print("   [ERROR] Could not retrieve robot position. Using mock input (0.0,0.0).")
         return 0.0 , 0.0   
            
-# ==========================================
-# 2. CALIBRATION CLASS
-# ==========================================
+
 class InteractiveCalibrator:
     def __init__(
         self,
@@ -67,7 +64,7 @@ class InteractiveCalibrator:
         parameters = cv2.aruco.DetectorParameters()
         self.detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
         
-        # This will hold the "Ground Truth" coordinates we teach it
+        # Stores robot ground truth coordinates
         self.robot_coords: Optional[np.ndarray] = None
 
     def get_realsense_frame(self) -> np.ndarray:
@@ -77,7 +74,7 @@ class InteractiveCalibrator:
         config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
         pipeline.start(config)
 
-        # Warmup to allow auto-exposure to settle
+        # Allow auto-exposure to settle
         for _ in range(10):
             pipeline.wait_for_frames()
 
@@ -101,7 +98,7 @@ class InteractiveCalibrator:
             print(f"\n[ACTION] Move robot tip to CENTER of Marker {tid}")
             input("Press ENTER when robot is in position...")
             
-            # Hardware call
+            # Get position from hardware
             rx, ry = get_current_robot_position(tid)
             
             print(f"   -> Recorded: ID {tid} = ({rx}, {ry})")
@@ -125,7 +122,7 @@ class InteractiveCalibrator:
         ids = ids.flatten()
         image_points: List[List[float]] = []
 
-        # Match camera detections to the order of self.robot_coords (0, 1, 2, 3)
+        # Match camera detections to marker order
         try:
             for target_id in self.marker_ids:
                 if target_id not in ids:
@@ -135,7 +132,7 @@ class InteractiveCalibrator:
                 index = list(ids).index(target_id)
                 marker_corners = corners[index][0]
                 
-                # Calculate center of the marker
+                # Calculate marker center
                 center_x = float(np.mean(marker_corners[:, 0]))
                 center_y = float(np.mean(marker_corners[:, 1]))
                 
@@ -148,20 +145,20 @@ class InteractiveCalibrator:
 
         image_points_arr = np.array(image_points, dtype="float32")
         
-        # Calculate the matrix
+        # Compute perspective transform matrix
         return cv2.getPerspectiveTransform(image_points_arr, self.robot_coords)
 
     def run(self) -> None:
-        # STEP 1: Interactive Teaching
+        # Interactive teaching phase
         if not self.teach_robot_points():
             return
 
-        # STEP 2: Clear the workspace
+        # Clear workspace phase
         print("\n--- PHASE 2: CAMERA CAPTURE ---")
         print("Please move the robot arm OUT of the camera's view. \n ALSO ensure that the Aruco markers are in place and clearly visible to the camera.")
         input("Press ENTER when the view is clear...")
 
-        # STEP 3: Capture & Calibrate
+        # Capture and calibrate
         print("Capturing image...")
         image = self.get_realsense_frame()
 

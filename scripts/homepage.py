@@ -1,3 +1,5 @@
+"""Gradio-based control interface for the RoArm-M2 robotic arm."""
+
 import gradio as gr
 import time
 import subprocess
@@ -11,32 +13,24 @@ import numpy as np
 import pyrealsense2 as rs
 from typing import Optional, Dict, Any, List, Tuple
 
-# Import text classifier and action controller
 from text_classifier import ActionClassifier
 from roarm_m2.actions.control_action import ActionController
 from colour_coordinates import ColourCoordinates
 
-# ==========================================
-# ROARM CONTROLLER CLASS
-# ==========================================
+
 class RoArmController:
-    """
-    An efficient controller for the RoArm-M2 that synchronizes Python execution 
-    with physical arm movement.
-    """
+    """Controller for the RoArm-M2 that synchronizes Python execution with arm movement."""
 
     def __init__(self, ip_address: str, port: int = 80, protocol: str = "http", timeout: int = 10):
         self.base_url = f"{protocol}://{ip_address}:{port}/js?json="
         self.timeout = timeout
         self.last_response = None
-        # Tolerance for deciding if the arm has "stopped" (radians/mm change per check)
+        # Tolerance for motion completion detection
         self.motion_tolerance = 0.02 
         print(f"[RoArm] Initialized. Endpoint: {self.base_url}")
 
     def _send_command(self, command_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Sends command and parses the immediate JSON acknowledgement.
-        """
+        """Send command and parse JSON acknowledgement."""
         try:
             json_payload = json.dumps(command_dict)
             url = f"{self.base_url}{json_payload}"
@@ -56,22 +50,13 @@ class RoArmController:
             return None
 
     def get_feedback(self) -> Optional[Dict[str, float]]:
-        """
-        Queries the arm's current status (T:105).
-        Returns a dictionary of current joint angles/coordinates.
-        """
+        """Query arm status and return current joint angles and coordinates."""
         cmd = {"T": 105}
         resp = self._send_command(cmd)
-        # RoArm usually returns keys like 'b', 's', 'e', 'h', 'x', 'y', 'z' in the response
         return resp
 
     def wait_for_motion_completion(self, check_interval: float = 0.2, stability_required: int = 3):
-        """
-        BLOCKS execution until the arm physically stops moving.
-        
-        Strategy: Poll status repeatedly. If the position hasn't changed 
-        significantly for 'stability_required' checks in a row, we assume it stopped.
-        """
+        """Block until arm stops moving by polling position stability."""
         print("[RoArm] Waiting for motion to complete...", end="", flush=True)
         
         stable_count = 0
@@ -83,10 +68,9 @@ class RoArmController:
             current_status = self.get_feedback()
             
             if not current_status:
-                break # Comm failure, don't block indefinitely
+                break
 
-            # Extract relevant movement metrics (joints b, s, e, h)
-            # We filter for keys that are likely numeric position data
+            # Extract position metrics
             current_values = {k: v for k, v in current_status.items() if k in ['b', 's', 'e', 'h', 'x', 'y', 'z'] and isinstance(v, (int, float))}
             
             if not last_values:
@@ -102,18 +86,18 @@ class RoArmController:
                 if delta > max_delta:
                     max_delta = delta
             
-            # Check if change is within "stopped" tolerance
+            # Check if stable
             if max_delta < self.motion_tolerance:
                 stable_count += 1
             else:
-                stable_count = 0 # Reset if we detect movement
+                stable_count = 0
                 
-            # If stable for enough consecutive checks, we are done
+            # Done if stable for enough checks
             if stable_count >= stability_required:
                 print(" Done.")
                 break
                 
-            # Safety timeout (e.g., 15 seconds max wait)
+            # Safety timeout
             if time.time() - start_time > 15:
                 print(" Timeout (Movement took too long).")
                 break
@@ -122,10 +106,7 @@ class RoArmController:
             time.sleep(check_interval)
 
     def move_cartesian(self, x: float, y: float, z: float, t: float, speed: float = 0.25, wait: bool = True):
-        """
-        Move to X,Y,Z coords (Inverse Kinematics).
-        If wait=True, code blocks until move is finished.
-        """
+        """Move to X,Y,Z coords using inverse kinematics."""
         cmd = {"T": 104, "x": x, "y": y, "z": z, "t": t, "spd": speed}
         print(f"\n[RoArm] Moving Cartesian: {x}, {y}, {z}")
         self._send_command(cmd)
@@ -133,9 +114,7 @@ class RoArmController:
             self.wait_for_motion_completion()
 
     def set_joint(self, joint_id: int, angle: float, speed: float = 0.25, wait: bool = True):
-        """
-        Move single joint. 1=Base, 2=Shoulder, 3=Elbow, 4=Hand.
-        """
+        """Move single joint. 1=Base, 2=Shoulder, 3=Elbow, 4=Hand."""
         cmd = {"T": 101, "joint": joint_id, "angle": angle, "spd": speed}
         print(f"\n[RoArm] Moving Joint {joint_id} to {angle}")
         self._send_command(cmd)
@@ -143,11 +122,11 @@ class RoArmController:
             self.wait_for_motion_completion()
 
     def set_torque(self, enable: bool):
-        """Enables/Disables motors."""
+        """Enable or disable motors."""
         cmd = {"T": 210, "cmd": 1 if enable else 0}
         self._send_command(cmd)
         print(f"[RoArm] Torque set to {enable}")
-        time.sleep(0.5) # Small buffer for hardware relay/activation
+        time.sleep(0.5)
 
 
 class RobotMock:
@@ -360,41 +339,37 @@ class RobotMockTeleop:
             return f"Drop failed: {e}"
 
 def system_logic():
-    """
-    Main application logic container.
-    """
+    """Main application logic container."""
     
-    # Define default state: Not calibrated, Not disabled
-    # We use a dictionary to allow mutable state passing
+    # Default state
     default_state = {
         "calibrated": False, 
         "disabled": False,
-        # Calibration state
         "calib_active": False,
-        "calib_step": 0,  # 0-3 for markers, 4 for camera capture, 5 for done
-        "calib_points": [],  # List of (x, y) tuples
+        "calib_step": 0,
+        "calib_points": [],
     }
     
-    # Initialize robot - will try real arm first, fall back to mock
+    # Initialize robot
     robot = RobotMockTeleop(ip_address="192.168.4.1")
     
-    # Initialize text classifier for command interpretation
+    # Initialize text classifier
     print("[System] Initializing action classifier...")
     action_classifier = ActionClassifier()
     action_classifier.train()
     print("[System] Action classifier ready")
     
-    # Initialize action controller for robot commands
+    # Initialize action controller
     print("[System] Initializing action controller...")
     action_controller = ActionController(roarm_ip="192.168.4.1")
     print("[System] Action controller ready")
     
-    # Initialize color detector for picking objects
+    # Initialize color detector
     print("[System] Initializing color detector...")
     color_detector = ColourCoordinates()
     print("[System] Color detector ready")
     
-    # Map keyboard keys to robot commands
+    # Teleop command mapping
     teleop_commands = {
         'w': lambda: robot.teleop_move('Forward'),
         's': lambda: robot.teleop_move('Backward'),
@@ -406,15 +381,12 @@ def system_logic():
     }
 
     def process_chat(user_message, history, state):
-        """
-        Handles chat interaction and inference generation.
-        Processes user commands through the text classifier and executes robot actions.
-        """
+        """Handle chat interaction and process robot commands."""
         # Ensure history is initialized
         if history is None:
             history = []
 
-        # Normalize older tuple-format histories to messages format
+        # Normalize older tuple-format histories
         if len(history) > 0 and isinstance(history[0], (list, tuple)):
             normalized = []
             for user_msg, bot_msg in history:
@@ -423,7 +395,6 @@ def system_logic():
             history = normalized
 
         if state["disabled"]:
-            # If system is disabled, prevent chat and return warning in messages format
             history.append({"role": "user", "content": user_message})
             history.append({"role": "assistant", "content": "SYSTEM DISABLED. MESSAGE REJECTED."})
             return history, "System is offline.", ""
@@ -431,7 +402,7 @@ def system_logic():
         if not user_message.strip():
             return history, "", ""
 
-        # Step 1: Classify the user message
+        # Classify the user message
         classification = action_classifier.predict(user_message)
         action = classification['action']
         color = classification['color']
@@ -439,7 +410,7 @@ def system_logic():
         
         # Build inference output
         inference_lines = [
-            f"━━━━ COMMAND ANALYSIS ━━━━",
+            f"COMMAND ANALYSIS",
             f"Input: {user_message}",
             f"Action: {action.upper()}",
         ]
@@ -450,7 +421,7 @@ def system_logic():
         inference_lines.append(f"Confidence: {confidence:.1%}")
         inference_lines.append(f"")
         
-        # Step 2: Execute the action
+        # Execute the action
         bot_response = ""
         
         if action == "none":
@@ -483,10 +454,10 @@ def system_logic():
                         )
                         
                         if success:
-                            bot_response = f"✓ Successfully picked {color} block! {msg}"
+                            bot_response = f"Successfully picked {color} block! {msg}"
                             inference_lines.append(f"Execution: SUCCESS")
                         else:
-                            bot_response = f"✗ Failed to pick {color} block: {msg}"
+                            bot_response = f"Failed to pick {color} block: {msg}"
                             inference_lines.append(f"Execution: FAILED - {msg}")
                             
                 except Exception as e:
@@ -500,10 +471,10 @@ def system_logic():
                 success, msg = action_controller.execute_action(action="place")
                 
                 if success:
-                    bot_response = f"✓ Successfully placed the block! {msg}"
+                    bot_response = f"Successfully placed the block! {msg}"
                     inference_lines.append(f"Execution: SUCCESS")
                 else:
-                    bot_response = f"✗ Failed to place block: {msg}"
+                    bot_response = f"Failed to place block: {msg}"
                     inference_lines.append(f"Execution: FAILED - {msg}")
                     
             except Exception as e:
@@ -517,10 +488,10 @@ def system_logic():
                 success, msg = action_controller.execute_action(action="drop")
                 
                 if success:
-                    bot_response = f"✓ Successfully dropped! {msg}"
+                    bot_response = f"Successfully dropped! {msg}"
                     inference_lines.append(f"Execution: SUCCESS")
                 else:
-                    bot_response = f"✗ Failed to drop: {msg}"
+                    bot_response = f"Failed to drop: {msg}"
                     inference_lines.append(f"Execution: FAILED - {msg}")
                     
             except Exception as e:
@@ -818,26 +789,22 @@ def system_logic():
     #     return f"Signal '{signal_code}' ignored.", state, gr.update(), gr.update(), gr.update()
 
     def execute_teleop_command(key_or_direction):
-        """
-        Execute teleop command based on key or direction button press.
-        """
+        """Execute teleop command based on key or direction button press."""
         if key_or_direction in teleop_commands:
             result = teleop_commands[key_or_direction]()
             return f"{result}"
         return "Invalid command"
 
-    # --- GUI Layout ---
+    # GUI Layout
     with gr.Blocks(title="Control Interface") as demo:
-        # State variable to hold system status across interactions within a session
+        # State variable
         system_state = gr.State(default_state)
         
         gr.Markdown("# System Control Interface")
         
         with gr.Row():
             with gr.Column(scale=2):
-                # Feature 1: Chatbot
-                # Removed 'type="messages"' to fix TypeError. 
-                # This component will now expect [[user_msg, bot_msg], ...] format.
+                # Chatbot
                 chatbot = gr.Chatbot(label="Conversation Log", height=400)
                 msg_input = gr.Textbox(
                     label="User Input", 
@@ -847,9 +814,9 @@ def system_logic():
                 clear = gr.ClearButton([msg_input, chatbot])
 
             with gr.Column(scale=1):
-                # Feature 2 & 4: Controls and Status
+                # Controls and status
                 gr.Markdown("### System Status")
-                # Determine whether calibration file exists; if it does, log and disable the button
+                # Check if calibration file exists
                 calib_file = os.path.join(os.path.dirname(__file__), "calibration", "calibration_matrix.npy")
                 file_exists = os.path.isfile(calib_file)
                 if file_exists:
@@ -859,7 +826,7 @@ def system_logic():
                     print(f"[Calibration] No calibration file found; enabling calibration button")
                     calibrate_btn = gr.Button("Send Calibration Signal", variant="primary", interactive=True)
                 
-                # Feature 3: Inference Display (also used for calibration prompts)
+                # Inference display
                 inference_output = gr.TextArea(
                     label="Inference / Processing Output", 
                     interactive=False,
@@ -901,9 +868,9 @@ def system_logic():
             teleop_up = gr.Button("U", size="lg")
             teleop_drop = gr.Button("O", size="lg")
 
-        # --- Event Wiring ---
+        # Event Wiring
 
-        # 1. Chat Interaction
+        # Chat Interaction
         msg_input.submit(
             process_chat, 
             inputs=[msg_input, chatbot, system_state], 
@@ -951,7 +918,7 @@ def system_logic():
         #     ]
         # )
 
-        # 5. Teleop Button Controls
+        # Teleop Button Controls
         teleop_forward.click(execute_teleop_command, inputs=gr.State('w'), outputs=teleop_output)
         teleop_left.click(execute_teleop_command, inputs=gr.State('a'), outputs=teleop_output)
         teleop_down.click(execute_teleop_command, inputs=gr.State('s'), outputs=teleop_output)
@@ -959,7 +926,7 @@ def system_logic():
         teleop_up.click(execute_teleop_command, inputs=gr.State('u'), outputs=teleop_output)
         teleop_drop.click(execute_teleop_command, inputs=gr.State('o'), outputs=teleop_output)
 
-        # 6. Keyboard input handler with JavaScript
+        # Keyboard input handler
         def register_keyboard_handler():
             return """
             <script>

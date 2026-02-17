@@ -1,16 +1,10 @@
-"""
-Text Classifier for Robot Actions using model2vec
-Classifies user prompts into: pick (with color), place, or drop
-"""
+"""Text classifier for robot actions using model2vec embeddings."""
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder
 import pickle
 import re
-
-# Install required packages first:
-# pip install model2vec scikit-learn --break-system-packages
 
 try:
     from model2vec import StaticModel
@@ -23,16 +17,15 @@ except ImportError:
 
 class ActionClassifier:
     def __init__(self):
-        """Initialize the classifier with model2vec embeddings"""
+        """Initialize the classifier with model2vec embeddings."""
         print("Loading model2vec model...")
-        # Using a small, fast model
         self.embedding_model = StaticModel.from_pretrained("minishlab/potion-base-8M")
         self.classifier = LogisticRegression(max_iter=1000, random_state=42)
         self.label_encoder = LabelEncoder()
         self.color_pattern = re.compile(r'\b(red|blue|green|yellow|orange|purple|black|white|pink|brown|gray|grey)\b', re.IGNORECASE)
         
     def prepare_training_data(self):
-        """Create training dataset with various phrasings"""
+        """Create training dataset with various phrasings."""
         training_data = [
             # Pick commands with colors
             ("pick the red block", "pick"),
@@ -120,12 +113,12 @@ class ActionClassifier:
         return training_data
     
     def extract_color(self, text):
-        """Extract color parameter from text"""
+        """Extract color parameter from text."""
         match = self.color_pattern.search(text)
         return match.group(1).lower() if match else None
     
     def train(self):
-        """Train the classifier"""
+        """Train the classifier."""
         print("Preparing training data...")
         training_data = self.prepare_training_data()
         
@@ -133,37 +126,28 @@ class ActionClassifier:
         labels = [item[1] for item in training_data]
         
         print("Generating embeddings...")
-        # Get embeddings for all training texts
         embeddings = self.embedding_model.encode(texts)
         
         print("Training classifier...")
-        # Encode labels
         encoded_labels = self.label_encoder.fit_transform(labels)
         
-        # Train classifier
         self.classifier.fit(embeddings, encoded_labels)
         
         print("Training complete!")
         print(f"Classes: {self.label_encoder.classes_}")
         
     def predict(self, text):
-        """
-        Classify a user prompt
-        Returns: (action, color) where color is None for place/drop actions
-        """
-        # Get embedding
+        """Classify a user prompt and return action, color, and confidence."""
         embedding = self.embedding_model.encode([text])
         
-        # Predict action
         prediction = self.classifier.predict(embedding)[0]
         action = self.label_encoder.inverse_transform([prediction])[0]
         
-        # Extract color if it's a pick action
+        # Extract color for pick actions
         color = None
         if action == "pick":
             color = self.extract_color(text)
         
-        # Get confidence scores
         probabilities = self.classifier.predict_proba(embedding)[0]
         confidence = max(probabilities)
         
@@ -178,7 +162,7 @@ class ActionClassifier:
         }
     
     def save(self, filepath='action_classifier.pkl'):
-        """Save the trained classifier"""
+        """Save the trained classifier."""
         with open(filepath, 'wb') as f:
             pickle.dump({
                 'classifier': self.classifier,
@@ -187,7 +171,7 @@ class ActionClassifier:
         print(f"Classifier saved to {filepath}")
     
     def load(self, filepath='action_classifier.pkl'):
-        """Load a trained classifier"""
+        """Load a trained classifier."""
         with open(filepath, 'rb') as f:
             data = pickle.load(f)
             self.classifier = data['classifier']
@@ -196,18 +180,14 @@ class ActionClassifier:
 
 
 def main():
-    """Demo of the classifier"""
-    print("=" * 60)
+    """Demo of the classifier."""
     print("Action Classifier for Robot Commands")
-    print("=" * 60)
     
     # Initialize and train
     classifier = ActionClassifier()
     classifier.train()
     
-    print("\n" + "=" * 60)
-    print("Testing the classifier:")
-    print("=" * 60)
+    print("\nTesting the classifier:")
     
     # Test examples
     test_prompts = [
@@ -226,19 +206,16 @@ def main():
     for prompt in test_prompts:
         result = classifier.predict(prompt)
         print(f"\nPrompt: '{prompt}'")
-        print(f"  → Action: {result['action']}")
+        print(f"  -> Action: {result['action']}")
         if result['color']:
-            print(f"  → Color: {result['color']}")
-        print(f"  → Confidence: {result['confidence']:.2%}")
+            print(f"  -> Color: {result['color']}")
+        print(f"  -> Confidence: {result['confidence']:.2%}")
     
     # Save the model
-    print("\n" + "=" * 60)
     classifier.save()
     
     # Interactive mode
-    print("\n" + "=" * 60)
-    print("Interactive Mode (type 'quit' to exit)")
-    print("=" * 60)
+    print("\nInteractive Mode (type 'quit' to exit)")
     
     while True:
         user_input = input("\nEnter command: ").strip()
@@ -248,10 +225,10 @@ def main():
             continue
             
         result = classifier.predict(user_input)
-        print(f"  → Action: {result['action']}")
+        print(f"  -> Action: {result['action']}")
         if result['color']:
-            print(f"  → Color: {result['color']}")
-        print(f"  → Confidence: {result['confidence']:.2%}")
+            print(f"  -> Color: {result['color']}")
+        print(f"  -> Confidence: {result['confidence']:.2%}")
 
 
 if __name__ == "__main__":

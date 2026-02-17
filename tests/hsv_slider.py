@@ -1,12 +1,13 @@
+"""RGB color segmenter with adjustable sliders for tuning Jenga block detection."""
+
 import cv2
 import numpy as np
 import pyrealsense2 as rs
 
 class RGBColorSegmenter:
     def __init__(self):
-        """Initialize RGB Color Segmenter with adjustable thresholds"""
+        """Initialize RGB Color Segmenter with adjustable thresholds."""
         
-        # Default color ranges for Jenga blocks (in BGR format for OpenCV)
         self.color_ranges = {
             'red': [(np.array([0, 0, 100]), np.array([100, 100, 255]))],
             'blue': [(np.array([100, 0, 0]), np.array([255, 100, 100]))],
@@ -16,62 +17,53 @@ class RGBColorSegmenter:
             'orange': [(np.array([0, 100, 150]), np.array([100, 200, 255]))]
         }
         
-        # Current color being adjusted
         self.current_color = 'red'
-        self.current_range_index = 0  # For colors with multiple ranges (like red)
+        self.current_range_index = 0
         
-        # Create window and trackbars
         self.window_name = 'RGB Color Segmenter'
         cv2.namedWindow(self.window_name)
         
-        # Initialize sliders with current color's values
         self._create_trackbars()
         
-        # RealSense pipeline
         self.pipeline = rs.pipeline()
         self.config = rs.config()
         
     def _create_trackbars(self):
-        """Create trackbars for RGB adjustment"""
+        """Create trackbars for RGB adjustment."""
         current_range = self.color_ranges[self.current_color][self.current_range_index]
         lower = current_range[0]
         upper = current_range[1]
         
-        # Lower bounds (BGR format)
         cv2.createTrackbar('B_min', self.window_name, int(lower[0]), 255, self._on_trackbar)
         cv2.createTrackbar('G_min', self.window_name, int(lower[1]), 255, self._on_trackbar)
         cv2.createTrackbar('R_min', self.window_name, int(lower[2]), 255, self._on_trackbar)
         
-        # Upper bounds (BGR format)
         cv2.createTrackbar('B_max', self.window_name, int(upper[0]), 255, self._on_trackbar)
         cv2.createTrackbar('G_max', self.window_name, int(upper[1]), 255, self._on_trackbar)
         cv2.createTrackbar('R_max', self.window_name, int(upper[2]), 255, self._on_trackbar)
         
-        # Color selector (0-5 for the 6 colors)
         cv2.createTrackbar('Color', self.window_name, 0, 5, self._on_color_change)
-        
-        # Range selector (for future expansion)
         cv2.createTrackbar('Range', self.window_name, 0, 0, self._on_range_change)
     
     def _on_trackbar(self, val):
-        """Callback for trackbar changes"""
+        """Callback for trackbar changes."""
         pass
     
     def _on_color_change(self, val):
-        """Callback when color selection changes"""
+        """Callback when color selection changes."""
         colors = ['red', 'blue', 'green', 'yellow', 'pink', 'orange']
         self.current_color = colors[val]
         self.current_range_index = 0
         self._update_trackbars()
     
     def _on_range_change(self, val):
-        """Callback when range selection changes"""
+        """Callback when range selection changes."""
         if val < len(self.color_ranges[self.current_color]):
             self.current_range_index = val
             self._update_trackbars()
     
     def _update_trackbars(self):
-        """Update trackbar positions to reflect current color range"""
+        """Update trackbar positions to reflect current color range."""
         current_range = self.color_ranges[self.current_color][self.current_range_index]
         lower = current_range[0]
         upper = current_range[1]
@@ -84,7 +76,7 @@ class RGBColorSegmenter:
         cv2.setTrackbarPos('R_max', self.window_name, int(upper[2]))
     
     def _get_current_rgb_range(self):
-        """Get current RGB range from trackbars"""
+        """Get current RGB range from trackbars."""
         b_min = cv2.getTrackbarPos('B_min', self.window_name)
         g_min = cv2.getTrackbarPos('G_min', self.window_name)
         r_min = cv2.getTrackbarPos('R_min', self.window_name)
@@ -98,13 +90,12 @@ class RGBColorSegmenter:
         return lower, upper
     
     def segment_color(self, bgr_image, color_name):
-        """Create mask for a specific color using stored ranges"""
+        """Create mask for a specific color using stored ranges."""
         mask = np.zeros(bgr_image.shape[:2], dtype=np.uint8)
         
         for lower, upper in self.color_ranges[color_name]:
             mask = cv2.bitwise_or(mask, cv2.inRange(bgr_image, lower, upper))
         
-        # Clean up the mask (Morphological operations)
         kernel = np.ones((5, 5), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -112,11 +103,10 @@ class RGBColorSegmenter:
         return mask
     
     def segment_current_color_with_sliders(self, bgr_image):
-        """Segment using current slider values (for testing)"""
+        """Segment using current slider values."""
         lower, upper = self._get_current_rgb_range()
         mask = cv2.inRange(bgr_image, lower, upper)
         
-        # Clean up the mask (Morphological operations)
         kernel = np.ones((5, 5), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -124,12 +114,9 @@ class RGBColorSegmenter:
         return mask
     
     def start_camera(self):
-        """Initialize RealSense camera"""
+        """Initialize RealSense camera."""
         try:
-            # Enable color stream
             self.config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-            
-            # Start pipeline
             self.pipeline.start(self.config)
             print("Camera started successfully")
             return True
@@ -138,7 +125,7 @@ class RGBColorSegmenter:
             return False
     
     def stop_camera(self):
-        """Stop RealSense camera"""
+        """Stop RealSense camera."""
         try:
             self.pipeline.stop()
             print("Camera stopped")
@@ -146,20 +133,19 @@ class RGBColorSegmenter:
             pass
     
     def run(self):
-        """Main loop for RGB segmentation with live camera feed"""
+        """Main loop for RGB segmentation with live camera feed."""
         if not self.start_camera():
             print("Failed to start camera. Exiting...")
             return
         
-        print("\n=== RGB Color Segmenter ===")
+        print("\nRGB Color Segmenter")
         print("Controls:")
-        print("  - Use 'Color' slider to select color (0=Red, 1=Blue, 2=Green, 3=Yellow, 4=Pink, 5=Orange)")
-        print("  - Use 'Range' slider to switch between ranges (if available)")
-        print("  - Adjust B_min/max, G_min/max, R_min/max sliders to tune the color range")
-        print("  - Press 's' to save current range")
-        print("  - Press 'p' to print all current ranges")
-        print("  - Press 'a' to segment ALL colors at once")
-        print("  - Press 'q' to quit")
+        print("  Color slider: 0=Red, 1=Blue, 2=Green, 3=Yellow, 4=Pink, 5=Orange")
+        print("  Range slider: switch between ranges if available")
+        print("  s: save current range")
+        print("  p: print all current ranges")
+        print("  a: segment ALL colors at once")
+        print("  q: quit")
         print()
         
         show_all_colors = False
@@ -242,15 +228,13 @@ class RGBColorSegmenter:
                 if key == ord('q'):
                     break
                 elif key == ord('s'):
-                    # Save current range
                     lower, upper = self._get_current_rgb_range()
                     self.color_ranges[self.current_color][self.current_range_index] = (lower, upper)
-                    print(f"\n✓ Saved range for {self.current_color} (index {self.current_range_index}):")
+                    print(f"\nSaved range for {self.current_color} (index {self.current_range_index}):")
                     print(f"  Lower: {lower}")
                     print(f"  Upper: {upper}")
                 elif key == ord('p'):
-                    # Print all current ranges
-                    print("\n=== Current Color Ranges ===")
+                    print("\nCurrent Color Ranges:")
                     print("self.color_ranges = {")
                     for color_name, ranges in self.color_ranges.items():
                         if len(ranges) == 1:
@@ -268,12 +252,11 @@ class RGBColorSegmenter:
                                     print("],")
                     print("}")
                 elif key == ord('a'):
-                    # Toggle all colors mode
                     show_all_colors = not show_all_colors
                     if show_all_colors:
-                        print("\n✓ Switched to ALL COLORS mode")
+                        print("\nSwitched to ALL COLORS mode")
                     else:
-                        print("\n✓ Switched to SINGLE COLOR mode")
+                        print("\nSwitched to SINGLE COLOR mode")
         
         finally:
             self.stop_camera()

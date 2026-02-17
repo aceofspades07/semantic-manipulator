@@ -1,3 +1,5 @@
+"""Jenga block detector using color segmentation and distance estimation."""
+
 import cv2
 import numpy as np
 import pyrealsense2 as rs
@@ -7,22 +9,10 @@ BLOCK_HEIGHT = 15.0
 
 class JengaBlockDetector:
     def __init__(self, focal_length=None, real_block_length=7, camera_intrinsics=None):
-        """
-        Initialize the Jenga block detector
-        
-        Args:
-            focal_length: Camera focal length in pixels
-            real_block_length: The length of the Jenga block's LONGEST side in cm.
-                               Standard Jenga is 1.5 x 2.5 x 7 cm.
-                               We use the longest side for better distance stability.
-            camera_intrinsics: Dict with keys 'fx', 'fy', 'ppx', 'ppy' for converting to 3D coords
-        """
         self.focal_length = focal_length
         self.real_block_length = real_block_length
 
-        # Known real-world short sides (cm). A Jenga block is 1.5 x 2.5 x 7 cm.
-        # Depending on orientation, the visible "breadth" can be 2.5cm (top face)
-        # or 1.5cm (side face). We use both to avoid over-splitting.
+        # Known Jenga block dimensions in cm (1.5 x 2.5 x 7)
         self.real_block_short_sides = (2.5, 1.5)
         self.split_tolerance = 0.30
         self.max_split_per_axis = 8
@@ -31,33 +21,32 @@ class JengaBlockDetector:
         self.camera_intrinsics = camera_intrinsics or {
             'fx': focal_length,
             'fy': focal_length,
-            'ppx': 320,  # Default principal point x (half of 640)
-            'ppy': 240   # Default principal point y (half of 480)
+            'ppx': 320,
+            'ppy': 240
         }
         
-        # Define HSV color ranges for each Jenga block color
-        # Tightened ranges to reduce false positives
+        # HSV color ranges for each block color
         self.color_ranges = {
             'red': [(np.array([0, 100, 100]), np.array([5, 255, 255])),
                     (np.array([160, 100, 100]), np.array([180, 255, 255]))],
             'blue': [(np.array([70, 100, 100]), np.array([130, 255, 255]))],
             'green': [(np.array([40, 50, 50]), np.array([80, 255, 255]))],
-            'yellow': [(np.array([21, 100, 100]), np.array([35, 255, 255]))], # Start at 21 to avoid Orange
-            'pink': [(np.array([140, 25, 150]), np.array([165, 255, 255]))],   # End at 159 to avoid high Red
-            'orange': [(np.array([6, 100, 100]), np.array([20, 255, 255]))]  # 11-20 to fit between Red and Yellow
+            'yellow': [(np.array([21, 100, 100]), np.array([35, 255, 255]))],
+            'pink': [(np.array([140, 25, 150]), np.array([165, 255, 255]))],
+            'orange': [(np.array([6, 100, 100]), np.array([20, 255, 255]))]
         }
         
         # Homography matrix for coordinate frame transformation
         self.homography_matrix = None
     
     def segment_color(self, hsv_image, color_name):
-        """Create mask for a specific color"""
+        """Create mask for a specific color."""
         mask = np.zeros(hsv_image.shape[:2], dtype=np.uint8)
         
         for lower, upper in self.color_ranges[color_name]:
             mask = cv2.bitwise_or(mask, cv2.inRange(hsv_image, lower, upper))
         
-        # Clean up the mask (Morphological operations)
+        # Clean up mask with morphological operations
         kernel = np.ones((5, 5), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -65,11 +54,9 @@ class JengaBlockDetector:
         return mask
     
     def find_aligned_rectangle(self, contour):
-        """Find the minimum area rectangle aligned with block edges"""
-        # minAreaRect returns (center(x, y), (width, height), angle of rotation)
+        """Find the minimum area rectangle aligned with block edges."""
         rect = cv2.minAreaRect(contour)
         
-        # FIX: np.int0 is deprecated in newer numpy versions, use int32
         box = cv2.boxPoints(rect)
         box = np.int32(box) 
         
@@ -77,11 +64,10 @@ class JengaBlockDetector:
         width, height = rect[1]
         angle = rect[2]
         
-        # Standardize: Ensure 'width' is always the longest side.
-        # This is crucial because our distance calc relies on the known length (7.5cm).
+        # Ensure width is always the longest side
         if width < height:
             width, height = height, width
-            angle += 90  # Adjust angle to match the swap
+            angle += 90
         
         return {
             'center': center,
@@ -92,39 +78,21 @@ class JengaBlockDetector:
         }
     
     def calculate_distance(self, pixel_width):
-        """Calculate distance from camera to block center using Pinhole model"""
+        """Calculate distance from camera to block center using pinhole model."""
         if self.focal_length is None:
             return 0.0
             
-        # D = (Real_Width * Focal_Length) / Pixel_Width
         distance = (self.real_block_length * self.focal_length) / pixel_width
         return distance
     
     def pixel_to_3d_world(self, pixel_x, pixel_y, distance_cm):
-        """
-        Convert 2D image coordinates to 3D world coordinates with camera as origin.
-        
-        Args:
-            pixel_x: X coordinate in image (column)
-            pixel_y: Y coordinate in image (row)
-            distance_cm: Distance from camera (depth) in cm
-            
-        Returns:
-            Dict with 'x', 'y', 'z' in cm, where camera is at origin (0, 0, 0)
-            Z-axis points forward (away from camera)
-            X-axis points right
-            Y-axis points down
-        """
+        """Convert 2D image coordinates to 3D world coordinates."""
         fx = self.camera_intrinsics['fx']
         fy = self.camera_intrinsics['fy']
         ppx = self.camera_intrinsics['ppx']
         ppy = self.camera_intrinsics['ppy']
         
-        # Using pinhole camera model
-        # X = (u - ppx) * Z / fx
-        # Y = (v - ppy) * Z / fy
-        # Z = distance
-        
+        # Pinhole camera model conversion
         x = (pixel_x - ppx) * distance_cm / fx
         y = (pixel_y - ppy) * distance_cm / fy
         z = distance_cm
@@ -136,7 +104,7 @@ class JengaBlockDetector:
         }
     
     def load_calibration_matrix(self, matrix_path="/home/arduino/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy"):
-        """Load homography matrix from calibration file"""
+        """Load homography matrix from calibration file."""
         try:
             self.homography_matrix = np.load(matrix_path)
             print(f"Loaded calibration matrix from {matrix_path}")
@@ -147,14 +115,7 @@ class JengaBlockDetector:
             return False
     
     def transform_to_new_frame(self, camera_coords):
-        """Transform coordinates from camera frame to new frame using homography
-        
-        Args:
-            camera_coords: Dict with 'x', 'y', 'z' in camera frame (cm)
-            
-        Returns:
-            Dict with 'x', 'y', 'z' in new frame, or None if no calibration matrix
-        """
+        """Transform coordinates from camera frame to robot frame using homography."""
         if self.homography_matrix is None:
             return None
             
@@ -182,9 +143,8 @@ class JengaBlockDetector:
         x_new = transformed_point[0] / transformed_point[2]
         y_new = transformed_point[1] / transformed_point[2]
         
-        # Calculate z coordinate: camera is at z=78.5cm, new frame origin at z=0
-        # Block's z in new frame = camera_z - distance_from_camera
-        camera_z_in_new_frame = 78.5  # cm
+        # Calculate z coordinate in robot frame
+        camera_z_in_new_frame = 78.5
         z_new = camera_z_in_new_frame - camera_coords['z'] + TABLE_Z_HEIGHT + BLOCK_HEIGHT / 2.0
         
         return {
@@ -194,10 +154,7 @@ class JengaBlockDetector:
         }
 
     def _major_axis_unit_vector(self, angle_deg):
-        """Return a unit vector (vx, vy) along the block's longest side in image coords.
-
-        Note: OpenCV image coordinates are: +x right, +y down.
-        """
+        """Return a unit vector along the block's longest side in image coords."""
         theta = np.deg2rad(angle_deg)
         vx = float(np.cos(theta))
         vy = float(np.sin(theta))
@@ -207,35 +164,18 @@ class JengaBlockDetector:
         return vx / norm, vy / norm
 
     def _direction_away_from_observer_bottom(self, vx, vy):
-        """Resolve the +/- ambiguity so the vector points away from an observer at bottom.
-
-        Observer A is at the bottom of the frame, facing the top.
-        "Away from A" therefore means "toward the top" in the image plane.
-        We choose the sign that maximizes the component in the (0, -1) direction.
-        """
+        """Resolve vector direction to point away from bottom of frame."""
         eps = 1e-6
-        # Prefer negative y (upwards). If perfectly horizontal, prefer +x for stability.
         if (vy > eps) or (abs(vy) <= eps and vx < 0):
             return -vx, -vy
         return vx, vy
     
     def _perpendicular_anticlockwise(self, vx, vy):
-        """Return a vector perpendicular (90° anticlockwise) to the input vector.
-        
-        For a vector (vx, vy), rotating 90° anticlockwise gives (-vy, vx).
-        """
+        """Return a vector perpendicular (90 degrees anticlockwise) to input."""
         return vy, -vx
     
     def _line_segment_intersection(self, p1, p2, p3, p4):
-        """Find intersection point between two line segments.
-        
-        Args:
-            p1, p2: First line segment endpoints (tuples)
-            p3, p4: Second line segment endpoints (tuples)
-            
-        Returns:
-            Intersection point as tuple (x, y) or None if no intersection
-        """
+        """Find intersection point between two line segments."""
         x1, y1 = p1
         x2, y2 = p2
         x3, y3 = p3
@@ -258,16 +198,7 @@ class JengaBlockDetector:
         return None
     
     def _find_bbox_intersection(self, center, direction_vx, direction_vy, box_points):
-        """Find where a ray from center intersects the bounding box.
-        
-        Args:
-            center: Starting point (x, y)
-            direction_vx, direction_vy: Direction vector (unit vector)
-            box_points: 4 corner points of the bounding box
-            
-        Returns:
-            Intersection point (x, y) or None
-        """
+        """Find where a ray from center intersects the bounding box."""
         cx, cy = center
         
         # Create a long ray from center in the given direction
@@ -294,14 +225,10 @@ class JengaBlockDetector:
         return closest_intersection
 
     def _split_rect_if_merged(self, rect_info):
-        """Split a (potentially merged) min-area rect into multiple block-sized rects.
-
-        If multiple same-color blocks touch, they can form a single contour.
-        Since Jenga blocks have fixed dimensions, we split oversized rectangles into
-        multiple equal-breadth rectangles. The number of splits scales with how much
-        the breadth/length exceeds the expected single-block size.
-
-        Returns a list of rect_info dicts (same schema as find_aligned_rectangle).
+        """Split a merged min-area rectangle into multiple block-sized rectangles.
+        
+        When multiple same-color blocks touch, they form a single contour.
+        This splits oversized rectangles based on expected Jenga dimensions.
         """
         width = float(rect_info['width'])
         height = float(rect_info['height'])
@@ -310,15 +237,13 @@ class JengaBlockDetector:
 
         observed_aspect = width / height
 
-        # Choose the expected aspect that best matches this observation to avoid
-        # splitting a single block when it is showing the 7x1.5 face.
+        # Choose expected aspect ratio that best matches observation
         expected_aspects = [self.real_block_length / s for s in self.real_block_short_sides]
         expected_aspect = min(expected_aspects, key=lambda a: abs(observed_aspect - a))
 
         tol = float(self.split_tolerance)
 
-        # Determine how many blocks are merged along each axis.
-        # For a single block: observed_aspect ~= expected_aspect.
+        # Determine how many blocks are merged along each axis
         n_major = 1
         if observed_aspect > expected_aspect * (1.0 + tol):
             n_major = int(round(observed_aspect / expected_aspect))
@@ -334,11 +259,11 @@ class JengaBlockDetector:
         if n_major == 1 and n_minor == 1:
             return [rect_info]
 
-        # Subdivide into a grid of n_major x n_minor rectangles aligned with the same angle.
+        # Subdivide into grid of rectangles aligned with same angle
         angle = float(rect_info['angle'])
         theta = np.deg2rad(angle)
-        ux, uy = float(np.cos(theta)), float(np.sin(theta))          # major axis
-        vx, vy = -uy, ux                                             # minor axis (perpendicular)
+        ux, uy = float(np.cos(theta)), float(np.sin(theta))
+        vx, vy = -uy, ux
 
         sub_w = width / n_major
         sub_h = height / n_minor
@@ -348,7 +273,7 @@ class JengaBlockDetector:
 
         for i in range(n_major):
             for j in range(n_minor):
-                # Offsets are centered so the grid stays centered at the original rect.
+                # Center offsets to keep grid centered on original rect
                 off_major = (i - (n_major - 1) / 2.0) * sub_w
                 off_minor = (j - (n_minor - 1) / 2.0) * sub_h
                 cx = cx0 + off_major * ux + off_minor * vx
@@ -369,7 +294,7 @@ class JengaBlockDetector:
         return out
     
     def detect_blocks(self, image):
-        """Detect all Jenga blocks in the image"""
+        """Detect all Jenga blocks in the image."""
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         detected_blocks = []
         
@@ -380,24 +305,23 @@ class JengaBlockDetector:
             for contour in contours:
                 area = cv2.contourArea(contour)
                 
-                # Filter by area - Jenga blocks should have reasonable size
-                if area < 500:  # Minimum area to filter noise
+                # Filter by minimum area
+                if area < 500:
                     continue
                 
                 rect_info = self.find_aligned_rectangle(contour)
-                # If the contour is a merged blob of multiple same-color blocks, split it
-                # into multiple block-sized rectangles based on expected Jenga dimensions.
+                # Split merged blobs into individual block rectangles
                 rect_infos = self._split_rect_if_merged(rect_info)
                 
-                # Filter by solidity - block should be mostly filled
+                # Filter by solidity
                 hull = cv2.convexHull(contour)
                 hull_area = cv2.contourArea(hull)
                 if hull_area > 0:
                     solidity = area / hull_area
-                    if solidity < 0.6:  # Less than 60% filled is likely not a block
+                    if solidity < 0.6:
                         continue
 
-                # Split-aware per-rectangle block creation
+                # Process each rectangle
                 approx_area_each = float(area) / max(1, len(rect_infos))
 
                 for ri in rect_infos:
@@ -407,20 +331,20 @@ class JengaBlockDetector:
                         continue
 
                     aspect_ratio = width / height
-                    # For split rectangles this should fall back into the normal range.
+                    # Filter invalid aspect ratios
                     if aspect_ratio < 1.2 or aspect_ratio > 6:
                         continue
 
-                    # Calculate distance using the LONGEST side
+                    # Calculate distance using longest side
                     dist = 0.0
                     if self.focal_length is not None:
                         dist = self.calculate_distance(width)
 
-                    # Convert 2D image center to 3D world coordinates
+                    # Convert to 3D coordinates
                     center_pixel = ri['center']
                     world_coords = self.pixel_to_3d_world(center_pixel[0], center_pixel[1], dist)
                     
-                    # Transform to new coordinate frame if calibration matrix is available
+                    # Transform to robot frame if calibration available
                     new_frame_coords = self.transform_to_new_frame(world_coords)
                     
                     # Calculate perpendicular intersection point
@@ -447,11 +371,11 @@ class JengaBlockDetector:
                         'distance': dist,
                         'aspect_ratio': aspect_ratio,
                         'solidity': solidity,
-                        'world_coords': world_coords,  # 3D coordinates with camera as origin
-                        'new_frame_coords': new_frame_coords,  # 3D coordinates in new frame
-                        'intersection_point': intersection,  # 2D pixel coordinates of intersection
-                        'intersection_world_coords': intersection_world_coords,  # 3D camera frame coords
-                        'intersection_new_frame_coords': intersection_new_frame_coords  # 3D new frame coords
+                        'world_coords': world_coords,
+                        'new_frame_coords': new_frame_coords,
+                        'intersection_point': intersection,
+                        'intersection_world_coords': intersection_world_coords,
+                        'intersection_new_frame_coords': intersection_new_frame_coords
                     }
 
                     detected_blocks.append(block_data)
@@ -459,18 +383,18 @@ class JengaBlockDetector:
         return detected_blocks
     
     def draw_results(self, image, blocks):
-        """Draw detected blocks and information on the image"""
+        """Draw detected blocks and information on the image."""
         result = image.copy()
         
         for block in blocks:
-            # Draw the aligned rectangle
+            # Draw aligned rectangle
             cv2.drawContours(result, [block['box']], 0, (0, 255, 0), 2)
             
             # Draw center point
             center = tuple(map(int, block['center']))
             cv2.circle(result, center, 5, (0, 0, 255), -1)
 
-            # Draw direction arrow along the block's length (away from bottom-of-frame observer)
+            # Draw direction arrow along block length
             vx, vy = self._major_axis_unit_vector(block['angle'])
             vx, vy = self._direction_away_from_observer_bottom(vx, vy)
             arrow_len = int(max(30, min(0.6 * float(block['width']), 180)))
@@ -478,21 +402,19 @@ class JengaBlockDetector:
                 int(round(block['center'][0] + vx * arrow_len)),
                 int(round(block['center'][1] + vy * arrow_len)),
             )
-            # Make arrow bold/visible: draw a dark outline first, then bright arrow on top
+            # Draw arrow with outline for visibility
             cv2.arrowedLine(result, center, end_pt, (0, 0, 0), 10, tipLength=0.35)
             cv2.arrowedLine(result, center, end_pt, (255, 255, 0), 5, tipLength=0.35)
             
-            # Draw perpendicular vector (90° anticlockwise) - already calculated in detect_blocks
+            # Draw perpendicular vector to intersection
             if block['intersection_point'] is not None:
                 intersection = block['intersection_point']
                 intersection_pt = (int(round(intersection[0])), int(round(intersection[1])))
-                # Draw perpendicular vector from center to intersection
                 cv2.arrowedLine(result, center, intersection_pt, (0, 0, 0), 8, tipLength=0.35)
-                cv2.arrowedLine(result, center, intersection_pt, (0, 255, 255), 4, tipLength=0.35)  # Cyan color
-                # Mark intersection point with a circle
-                cv2.circle(result, intersection_pt, 6, (255, 0, 255), -1)  # Magenta circle
+                cv2.arrowedLine(result, center, intersection_pt, (0, 255, 255), 4, tipLength=0.35)
+                cv2.circle(result, intersection_pt, 6, (255, 0, 255), -1)
             
-            # Text information: coordinates, color, and orientation
+            # Display coordinate and color info
             text_lines = []
 
             if block['new_frame_coords'] is not None:
@@ -501,7 +423,6 @@ class JengaBlockDetector:
                 text_lines.append(f"{block['color'].upper()}")
                 text_lines.append(f"{block['angle']:.0f} DEG")
             else:
-                # Fallback if calibration/new frame is not available
                 text_lines.append("(N/A,N/A,N/A)")
                 text_lines.append(f"{block['color'].upper()}")
                 text_lines.append(f"{block['angle']:.0f} DEG")
@@ -514,9 +435,8 @@ class JengaBlockDetector:
         
         return result
 
-# --- MAIN EXECUTION ---
+# Main execution
 if __name__ == "__main__":
-    # Standard Jenga block length is 7.5 cm (Longest side)
     detector = JengaBlockDetector(real_block_length=7)
     
     print("Starting RealSense Stream...")
@@ -527,20 +447,17 @@ if __name__ == "__main__":
 
     
 
-    # Initialize frame count variable
     frame_count = 0
     
     try:
         profile = pipeline.start(config)
         
-        # Get intrinsics for automatic focal length
+        # Get camera intrinsics
         color_stream = profile.get_stream(rs.stream.color)
         intrinsics = color_stream.as_video_stream_profile().get_intrinsics()
         
-        # fx is the focal length in pixels for the width axis
         detector.focal_length = intrinsics.fx
         
-        # Store camera intrinsics for 3D coordinate conversion
         detector.camera_intrinsics = {
             'fx': intrinsics.fx,
             'fy': intrinsics.fy,
@@ -553,7 +470,7 @@ if __name__ == "__main__":
         print(f"  Principal Point: ({intrinsics.ppx:.2f}, {intrinsics.ppy:.2f})")
         print(f"  Resolution: {intrinsics.width} x {intrinsics.height}")
         
-        # Load calibration matrix for coordinate transformation
+        # Load calibration matrix
         detector.load_calibration_matrix("/home/arduino/Qualcomm-AI-Challenge/calibration/calibration_matrix.npy")
         
         while True:
@@ -566,28 +483,23 @@ if __name__ == "__main__":
             frame = np.asanyarray(color_frame.get_data())
             frame_count += 1
             
-            # Detection
+            # Run detection
             blocks = detector.detect_blocks(frame)
             result_frame = detector.draw_results(frame, blocks)
             
-            # GUI Overlays
+            # Display block count
             cv2.putText(result_frame, f"Blocks: {len(blocks)}", (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
             cv2.imshow('RealSense Jenga Detection', result_frame)
             
-            # Print periodic logs
+            # Log intersection coordinates periodically
             if frame_count % 60 == 0 and blocks:
                 print(f"--- Frame {frame_count} ---")
                 for b in blocks:
                     coords = b['world_coords']
                     new_coords = b['new_frame_coords']
-                    # coord_str = f"Camera: X={coords['x']:.1f}, Y={coords['y']:.1f}, Z={coords['z']:.1f}cm"
-                    # if new_coords is not None:
-                    #     coord_str += f" | New Frame: X={new_coords['x']:.1f}, Y={new_coords['y']:.1f}, Z={new_coords['z']:.1f}cm"
-                    # print(f"[{b['color']}] Distance: {b['distance']:.1f}cm | Angle: {b['angle']:.1f}° | {coord_str}")
                     
-                    # Print intersection point coordinates
                     if b['intersection_world_coords'] is not None:
                         int_cam = b['intersection_world_coords']
                         int_new = b['intersection_new_frame_coords']

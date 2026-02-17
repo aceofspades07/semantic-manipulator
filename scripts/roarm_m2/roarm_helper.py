@@ -1,3 +1,5 @@
+"""RoArm-M2 controller with motion completion synchronization."""
+
 import requests
 import json
 import time
@@ -5,23 +7,18 @@ import math
 from typing import Optional, Dict, Any, Union
 
 class RoArmController:
-    """
-    An efficient controller for the RoArm-M2 that synchronizes Python execution 
-    with physical arm movement.
-    """
+    """Controller for the RoArm-M2 that synchronizes execution with arm movement."""
 
     def __init__(self, ip_address: str, port: int = 80, protocol: str = "http", timeout: int = 10):
         self.base_url = f"{protocol}://{ip_address}:{port}/js?json="
         self.timeout = timeout
         self.last_response = None
-        # Tolerance for deciding if the arm has "stopped" (radians/mm change per check)
+        # Tolerance for motion completion detection
         self.motion_tolerance = 0.02 
         print(f"[RoArm] Initialized. Endpoint: {self.base_url}")
 
     def _send_command(self, command_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Sends command and parses the immediate JSON acknowledgement.
-        """
+        """Send command and parse JSON acknowledgement."""
         try:
             json_payload = json.dumps(command_dict)
             url = f"{self.base_url}{json_payload}"
@@ -41,22 +38,13 @@ class RoArmController:
             return None
 
     def get_feedback(self) -> Optional[Dict[str, float]]:
-        """
-        Queries the arm's current status (T:105).
-        Returns a dictionary of current joint angles/coordinates.
-        """
+        """Query arm status and return current joint angles and coordinates."""
         cmd = {"T": 105}
         resp = self._send_command(cmd)
-        # RoArm usually returns keys like 'b', 's', 'e', 'h', 'x', 'y', 'z' in the response
         return resp
 
     def wait_for_motion_completion(self, check_interval: float = 0.2, stability_required: int = 3):
-        """
-        BLOCKS execution until the arm physically stops moving.
-        
-        Strategy: Poll status repeatedly. If the position hasn't changed 
-        significantly for 'stability_required' checks in a row, we assume it stopped.
-        """
+        """Block until arm stops moving by polling position stability."""
         print("[RoArm] Waiting for motion to complete...", end="", flush=True)
         
         stable_count = 0
@@ -68,10 +56,9 @@ class RoArmController:
             current_status = self.get_feedback()
             
             if not current_status:
-                break # Comm failure, don't block indefinitely
+                break
 
-            # Extract relevant movement metrics (joints b, s, e, h)
-            # We filter for keys that are likely numeric position data
+            # Extract position metrics
             current_values = {k: v for k, v in current_status.items() if k in ['b', 's', 'e', 'h', 'x', 'y', 'z'] and isinstance(v, (int, float))}
             
             if not last_values:
@@ -87,18 +74,18 @@ class RoArmController:
                 if delta > max_delta:
                     max_delta = delta
             
-            # Check if change is within "stopped" tolerance
+            # Check if stable
             if max_delta < self.motion_tolerance:
                 stable_count += 1
             else:
-                stable_count = 0 # Reset if we detect movement
+                stable_count = 0
                 
-            # If stable for enough consecutive checks, we are done
+            # Done if stable for enough checks
             if stable_count >= stability_required:
                 print(" Done.")
                 break
                 
-            # Safety timeout (e.g., 15 seconds max wait)
+            # Safety timeout
             if time.time() - start_time > 15:
                 print(" Timeout (Movement took too long).")
                 break
@@ -106,15 +93,9 @@ class RoArmController:
             last_values = current_values
             time.sleep(check_interval)
 
-    # =========================================================================
-    # MOVEMENT FUNCTIONS (Now with 'wait' argument)
-    # =========================================================================
 
     def move_cartesian(self, x: float, y: float, z: float, t: float, speed: float = 0.25, wait: bool = True):
-        """
-        Move to X,Y,Z coords (Inverse Kinematics).
-        If wait=True, code blocks until move is finished.
-        """
+        """Move to X,Y,Z coords using inverse kinematics."""
         cmd = {"T": 104, "x": x, "y": y, "z": z, "t": t, "spd": speed}
         print(f"\n[RoArm] Moving Cartesian: {x}, {y}, {z}")
         self._send_command(cmd)
@@ -122,9 +103,7 @@ class RoArmController:
             self.wait_for_motion_completion()
 
     def set_joint(self, joint_id: int, angle: float, speed: float = 0.25, wait: bool = True):
-        """
-        Move single joint. 1=Base, 2=Shoulder, 3=Elbow, 4=Hand.
-        """
+        """Move single joint. 1=Base, 2=Shoulder, 3=Elbow, 4=Hand."""
         cmd = {"T": 101, "joint": joint_id, "angle": angle, "spd": speed}
         print(f"\n[RoArm] Moving Joint {joint_id} to {angle}")
         self._send_command(cmd)
@@ -132,28 +111,23 @@ class RoArmController:
             self.wait_for_motion_completion()
 
     def set_torque(self, enable: bool):
-        """Enables/Disables motors."""
+        """Enable or disable motors."""
         cmd = {"T": 210, "cmd": 1 if enable else 0}
         self._send_command(cmd)
         print(f"[RoArm] Torque set to {enable}")
-        time.sleep(0.5) # Small buffer for hardware relay/activation
+        time.sleep(0.5)
 
-# =============================================================================
-# EFFICIENT EXECUTION FLOW
-# =============================================================================
+
 if __name__ == "__main__":
     ROARM_IP = "192.168.4.1" 
     
-    # 1. Connect
+    # Connect
     arm = RoArmController(ip_address=ROARM_IP)
 
-    # 2. Ensure Torque is ON
+    # Enable torque
     arm.set_torque(True)
 
-    # 3. Define a sequence of tasks (The efficient part)
-    # Because 'wait=True' is default, these will execute back-to-back perfectly
-    # without any manual 'time.sleep()' guessing.
-    
+    # Execute movement sequence
     try:
         # Move Home
         arm.move_cartesian(x=200, y=0, z=150, t=3.14, speed=0.5)
@@ -164,11 +138,11 @@ if __name__ == "__main__":
         # Move Right
         arm.move_cartesian(x=200, y=-100, z=150, t=3.14, speed=0.5)
         
-        # Grab Action (Joint 4)
-        arm.set_joint(joint_id=4, angle=3.14, wait=True) # Open
-        arm.set_joint(joint_id=4, angle=1.57, wait=True) # Close
+        # Grab action
+        arm.set_joint(joint_id=4, angle=3.14, wait=True)
+        arm.set_joint(joint_id=4, angle=1.57, wait=True)
 
-        # Return Home
+        # Return home
         arm.move_cartesian(x=200, y=0, z=150, t=3.14, speed=0.5)
 
     except KeyboardInterrupt:

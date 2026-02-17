@@ -1,11 +1,4 @@
-"""Pickup action for RoArm-M2 (Jenga Block Logic).
-
-Modified to:
-1. Open gripper.
-2. Move to coordinates.
-3. Close gripper (pickup).
-4. Return to home position (while holding the object).
-"""
+"""Pickup action for RoArm-M2 to grab Jenga blocks and return to home."""
 
 import os
 import time
@@ -16,7 +9,7 @@ TABLE_HEIGHT = -120
 BLOCK_HEIGHT = 25
 
 def _load_roarm_controller_class():
-    """Dynamically loads RoArmController from ../roarm_helper.py."""
+    """Dynamically loads RoArmController from roarm_helper.py."""
     here = os.path.dirname(__file__)
     helper_path = os.path.normpath(os.path.join(here, "..", "roarm_helper.py"))
     
@@ -49,23 +42,11 @@ def pickup(targets: Dict[str, List[Iterable[float]]],
            approach_z_default: float = -110.0,
            grasp_z_default: float = -120.0,
            home_coords: Tuple[float, float, float] = (200.0, 0.0, 150.0)) -> Tuple[bool, str]:
-    """Perform a pickup sequence and return home.
-
-    Args:
-        targets: Dictionary of coordinates.
-        color: Specific color key to pick.
-        arm: Optional existing controller instance.
-        roarm_ip: IP address if arm needs to be initialized.
-        open_angle: Servo angle for open gripper.
-        close_angle: Servo angle for closed gripper.
-        approach_z_default: Height to hover before lowering.
-        grasp_z_default: Height to grab the object.
-        home_coords: (x, y, z) to return to after picking up.
-    """
+    """Perform a pickup sequence and return home."""
     if not isinstance(targets, dict) or not targets:
         return False, "Targets must be a non-empty dict"
 
-    # 1. Select Color
+    # Select color
     if color is None:
         color = next(iter(targets.keys()))
     
@@ -76,40 +57,37 @@ def pickup(targets: Dict[str, List[Iterable[float]]],
     if not coords_list:
         return False, f"No coordinates found for color {color!r}"
 
-    # 2. Parse Coordinate
+    # Parse coordinate
     try:
         x, y, z = _ensure_coordinate(coords_list[0])
     except Exception as e:
         return False, f"Invalid coordinate: {e}"
 
-    # 3. Initialize Controller
+    # Initialize controller
     try:
         if arm is None:
             RoArmController = _load_roarm_controller_class()
             arm = RoArmController(ip_address=roarm_ip)
         
-        # Ensure motors are enabled (Torque On)
         arm.set_torque(True)
     except Exception as e:
         return False, f"Failed to initialize arm: {e}"
 
-    # Calculate Heights
+    # Calculate heights
     approach_z = (z + 10.0) if (z is not None) else approach_z_default
     grasp_z = (z - BLOCK_HEIGHT/2) if (z is not None) else grasp_z_default
 
-    # --- ACTION SEQUENCE ---
-
-    # Step 1: Open Gripper
+    # Open gripper
     try:
         arm.set_joint(joint_id=4, angle=open_angle, wait=True)
     except Exception as e:
         return False, f"Failed to open gripper: {e}"
 
-    # Step 2: Move to Approach (High)
+    # Move to approach height
     try:
         arm.move_cartesian(
             x=x, y=y, z=approach_z, 
-            t=open_angle,  # Keep gripper open
+            t=open_angle,
             speed=0.4, wait=True
         )
     except Exception as e:
@@ -117,30 +95,29 @@ def pickup(targets: Dict[str, List[Iterable[float]]],
 
     time.sleep(0.1)
 
-    # Step 3: Lower to Grasp (Low)
+    # Lower to grasp height
     try:
         arm.move_cartesian(
             x=x, y=y, z=grasp_z, 
-            t=open_angle, # Keep gripper open while descending
+            t=open_angle,
             speed=0.2, wait=True
         )
     except Exception as e:
         return False, f"Failed to lower arm: {e}"
 
-    # Step 4: Close Gripper (Grasp)
+    # Close gripper to grasp
     try:
         arm.set_joint(joint_id=4, angle=close_angle, wait=True)
     except Exception as e:
         return False, f"Failed to close gripper: {e}"
 
-    time.sleep(1.5) # Allow slightly more time for secure Jenga grip
+    time.sleep(1.5)
 
-    # Step 5: Vertical Safety Lift
-    # We lift straight up first to avoid knocking over other blocks
+    # Vertical safety lift to avoid knocking other blocks
     try:
         arm.move_cartesian(
             x=x, y=y, z=grasp_z, 
-            t=close_angle, # KEEP gripper closed
+            t=close_angle,
             speed=0.3, wait=True
         )
     except Exception as e:
@@ -148,13 +125,12 @@ def pickup(targets: Dict[str, List[Iterable[float]]],
     
     time.sleep(1)
 
-    # Step 6: Return to Home
-    # Move to the defined home coordinates carrying the object
+    # Return to home while holding the object
     try:
         hx, hy, hz = home_coords
         arm.move_cartesian(
             x=hx, y=hy, z=hz,
-            t=close_angle, # CRITICAL: Maintain closed grip during home move
+            t=close_angle,
             speed=0.4, wait=True
         )
     except Exception as e:
@@ -164,12 +140,9 @@ def pickup(targets: Dict[str, List[Iterable[float]]],
 
 
 if __name__ == "__main__":
-    # Test configuration
-    # Example Jenga block coordinate
     test_targets = {"jenga_block": [(200.0,0.0,-120.0)]} 
     
     print("Starting pickup test...")
-    # Passing a specific home position (High and Center)
     success, message = pickup(test_targets, home_coords=(180, 0, 150))
     print(f"Result: {success}")
     print(f"Message: {message}")
