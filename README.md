@@ -2,6 +2,8 @@
 
 **Natural language-controlled robotic manipulation of colored blocks using monocular vision, lightweight semantic parsing, and finite state machine grounding.**
 
+To read the Technical Blog for this project, please click here : [Semantic Manipulator](https://aceofspades07.github.io/blog/semantic-manipulator.html). This blog gives a deep dive into the architecture of this system. Do give it a read!
+
 <img src="./assets/workspace.jpg" alt="The setup" width="480">
 
 ---
